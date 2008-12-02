@@ -47,8 +47,44 @@ extern "C" {
 
 namespace {
 
+  using namespace MsgLogger ;
+
   // get current time and format it
   void formattedTime ( std::string fmt, std::ostream& out ) ;
+
+  // default format string
+  const std::string s_defFmt = "%(time) [%(LVL)] {%(logger)} %(file):%(line) - %(message)" ;
+
+  // these format strings are set with addGlobalFormat
+  std::string s_appFmtMap [MsgLogLevel::LAST_LEVEL+1] ;
+
+  // this format strings are set from the environment
+  std::string s_envFmtMap [MsgLogLevel::LAST_LEVEL+1] ;
+
+  void initFmtMap() {
+
+    static bool initDone = false ;
+    if ( not initDone ) {
+      initDone = true ;
+
+      // variable MSGLOGFMT defines global format string
+      if ( const char* env = getenv ( "MSGLOGFMT" ) ) {
+        std::fill_n ( s_envFmtMap, MsgLogLevel::LAST_LEVEL+1, env ) ;
+      }
+
+      // variables MSGLOGFMT_DBG, MSGLOGFMT_TRC, etc. define level-specific
+      // format strings
+      for ( int i = 0 ; i < MsgLogLevel::LAST_LEVEL+1 ; ++ i ) {
+        MsgLogLevel lvl(i) ;
+        std::string envname = "MSGLOGFMT_" ;
+        envname += lvl.level3() ;
+        if ( const char* env = getenv ( envname.c_str() ) ) {
+          s_envFmtMap[i] = env ;
+        }
+      }
+
+    }
+  }
 
 }
 
@@ -62,16 +98,8 @@ namespace MsgLogger {
 MsgFormatter::MsgFormatter( const std::string& afmt, const std::string& timefmt )
   : _timefmt(timefmt)
 {
-  std::string fmt = afmt ;
-  if ( fmt.empty() ) {
-    if ( const char* env = getenv ( "MSGLOGFMT" ) ) {
-      fmt = env ;
-    } else {
-      fmt = "%(time) [%(LVL)] {%(logger)} %(file):%(line) - %(message)" ;
-    }
-  }
-
-  std::fill_n ( _fmtMap, MsgLogLevel::LAST_LEVEL+1, fmt ) ;
+  // initialize global format map
+  ::initFmtMap() ;
 
   if ( _timefmt.empty() ) {
     if ( const char* env = getenv ( "MSGLOGTIMEFMT" ) ) {
@@ -87,6 +115,19 @@ MsgFormatter::~MsgFormatter()
 {
 }
 
+// set format for all formatters
+void
+MsgFormatter::addGlobalFormat ( const std::string& fmt )
+{
+  std::fill_n ( ::s_appFmtMap, MsgLogLevel::LAST_LEVEL+1, fmt ) ;
+}
+
+void
+MsgFormatter::addGlobalFormat ( MsgLogLevel level, const std::string& fmt )
+{
+  ::s_appFmtMap[level.code()] = fmt ;
+}
+
 // add level-specific format
 void
 MsgFormatter::addFormat ( MsgLogLevel level, const std::string& fmt )
@@ -98,7 +139,7 @@ MsgFormatter::addFormat ( MsgLogLevel level, const std::string& fmt )
 void
 MsgFormatter::format ( const MsgLogRecord& rec, std::ostream& out )
 {
-  const std::string& fmt = _fmtMap[rec.level().code()];
+  const std::string& fmt = getFormat( rec.level() );
 
   // read format and fill the stream
   for ( std::string::const_iterator i = fmt.begin() ; i != fmt.end() ; ++ i ) {
@@ -184,6 +225,24 @@ MsgFormatter::format ( const MsgLogRecord& rec, std::ostream& out )
 
 
 }
+
+// get a format string for a given level
+const std::string&
+MsgFormatter::getFormat ( MsgLogLevel level ) const
+{
+  int lvl = level.code() ;
+  if ( not _fmtMap[lvl].empty() ) {
+    return _fmtMap[lvl] ;
+  } else if ( not ::s_envFmtMap[lvl].empty() ) {
+    return ::s_envFmtMap[lvl] ;
+  } else if ( not ::s_appFmtMap[lvl].empty() ) {
+    return ::s_appFmtMap[lvl] ;
+  } else {
+    return ::s_defFmt ;
+  }
+}
+
+
 
 } // namespace MsgLogger
 
